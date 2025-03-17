@@ -47,7 +47,7 @@ def extract_position(info):
             return "COPILOTO"
     return "DESCONOCIDO"
 
-# Inicializar session_state para valores iniciales si no existen
+# Inicializar session_state para el DataFrame si no existe
 if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame()
 
@@ -93,15 +93,8 @@ if uploaded_file is not None and st.session_state.df.empty:
                 df['Alias'] = df['Info'].apply(extract_alias)
                 df['Position'] = df['Info'].apply(extract_position)
                 
-                # Casilla para filtrar "instrucción"
-                in_training = st.checkbox("¿En instrucción?", value=False)
-                if in_training:
-                    df = df[df['Info'].str.lower().str.contains("instruccion", na=False)]
-                else:
-                    df = df[~df['Info'].str.lower().str.contains("instruccion", na=False)]
-                
                 if df.empty:
-                    st.warning("No hay datos después de aplicar el filtro de instrucción.")
+                    st.warning("No hay datos en el PDF procesado.")
                 else:
                     st.session_state.df = df
                     df.to_csv("output_with_alias_position.csv", index=False)
@@ -131,6 +124,7 @@ if not st.session_state.df.empty:
             original_best_match = st.session_state.df['Alias'].iloc[best_match_index]
             user_row = st.session_state.df[st.session_state.df['Alias'] == original_best_match].iloc[0]
             user_position = user_row['Position']
+            user_in_training = "instruccion" in user_row['Info'].lower()  # Verificar si el usuario está en instrucción
             
             st.write(f"Coincidencia encontrada: '{original_best_match}' (Similitud: {score}%)")
             st.dataframe(user_row.to_frame().T)
@@ -166,11 +160,13 @@ if not st.session_state.df.empty:
 
             # Procesar solo si se presiona "Buscar"
             if search_button and selected_date and available_dates:
+                # Filtrar compañeros según "instruccion" además de "SA"/"LI" y posición
                 potential_swaps = st.session_state.df[
                     (st.session_state.df[selected_date].str.contains("SA", na=False) | 
                      st.session_state.df[selected_date].str.contains("LI", na=False)) &
                     (st.session_state.df['Alias'] != original_best_match) &
-                    (st.session_state.df['Position'] == user_position)
+                    (st.session_state.df['Position'] == user_position) &
+                    (st.session_state.df['Info'].str.lower().str.contains("instruccion", na=False) == user_in_training)
                 ]
 
                 if not potential_swaps.empty:
@@ -197,7 +193,7 @@ if not st.session_state.df.empty:
                     else:
                         st.warning("No hay compañeros con vuelos en las fechas seleccionadas.")
                 else:
-                    st.warning(f"No hay compañeros con 'SA' o 'LI' en {selected_date} con la misma posición ({user_position}).")
+                    st.warning(f"No hay compañeros con 'SA' o 'LI' en {selected_date} que también estén en instrucción.")
         else:
             st.warning("No se encontró ninguna coincidencia con suficiente similitud.")
     else:
