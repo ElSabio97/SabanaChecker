@@ -1,0 +1,5 @@
+pdfplumber==0.11.4
+pandas==2.2.2
+streamlit==1.38.0
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.25.1
