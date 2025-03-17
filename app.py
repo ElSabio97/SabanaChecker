@@ -26,8 +26,7 @@ def combine_tables(table1, table2, date_list):
     data1 = table1[1:]
     data2 = table2[1:]
     combined_data = [row1 + row2[1:] for row1, row2 in zip(data1, data2)]
-    df = pd.DataFrame(combined_data, columns=headers[:len(table1[0]) + len(table2[0]) - 1])
-    return df
+    return pd.DataFrame(combined_data, columns=headers[:len(table1[0]) + len(table2[0]) - 1])
 
 def normalize_text(text):
     """Normaliza caracteres (Ñ → N, etc.) y convierte a mayúsculas."""
@@ -49,10 +48,8 @@ def extract_position(info):
     return "DESCONOCIDO"
 
 # Inicializar session_state para valores iniciales si no existen
-if 'selected_date' not in st.session_state:
-    st.session_state.selected_date = None
-if 'available_dates' not in st.session_state:
-    st.session_state.available_dates = []
+if 'df' not in st.session_state:
+    st.session_state.df = pd.DataFrame()
 
 # Interfaz de Streamlit
 st.title("Buscador de Intercambios de Vuelos")
@@ -60,7 +57,7 @@ st.title("Buscador de Intercambios de Vuelos")
 # Permitir al usuario subir el archivo PDF
 uploaded_file = st.file_uploader("Sube la sábana en pdf", type="pdf")
 
-if uploaded_file is not None:
+if uploaded_file is not None and st.session_state.df.empty:
     # Procesamiento del PDF subido
     try:
         with pdfplumber.open(uploaded_file) as pdf:
@@ -103,86 +100,83 @@ if uploaded_file is not None:
                 else:
                     df = df[~df['Info'].str.lower().str.contains("instruccion", na=False)]
                 
-                if not df.empty:
-                    df.to_csv("output_with_alias_position.csv", index=False)
-                else:
+                if df.empty:
                     st.warning("No hay datos después de aplicar el filtro de instrucción.")
+                else:
+                    st.session_state.df = df
+                    df.to_csv("output_with_alias_position.csv", index=False)
             else:
                 st.warning("No se encontraron tablas válidas para combinar.")
-                df = pd.DataFrame()
+                st.session_state.df = pd.DataFrame()
 
     except Exception as e:
         st.error(f"Error al procesar el PDF: {e}")
-        df = pd.DataFrame()
-else:
+        st.session_state.df = pd.DataFrame()
+elif uploaded_file is None:
     st.info("Por favor, sube la sábana para continuar.")
-    df = pd.DataFrame()
 
 # Continuar con la lógica solo si hay un DataFrame válido
-if not df.empty:
+if not st.session_state.df.empty:
     alias_input = st.text_input("Introduce tu alias (e.g., PEDRO LUIS):", "")
 
     if alias_input:
         alias_normalized = normalize_text(alias_input)
-        aliases_original = df['Alias'].tolist()
+        aliases_original = st.session_state.df['Alias'].tolist()
         aliases_normalized = [normalize_text(alias) for alias in aliases_original]
         matches = process.extractOne(alias_normalized, aliases_normalized, scorer=fuzz.token_sort_ratio)
         
         if matches and matches[1] >= 50:
             best_match, score = matches
             best_match_index = aliases_normalized.index(best_match)
-            original_best_match = df['Alias'].iloc[best_match_index]
-            user_row = df[df['Alias'] == original_best_match].iloc[0]
-            user_position = user_row['Position']  # Guardar la posición del usuario
+            original_best_match = st.session_state.df['Alias'].iloc[best_match_index]
+            user_row = st.session_state.df[st.session_state.df['Alias'] == original_best_match].iloc[0]
+            user_position = user_row['Position']
             
             st.write(f"Coincidencia encontrada: '{original_best_match}' (Similitud: {score}%)")
             st.dataframe(user_row.to_frame().T)
 
             # Filtrar fechas posteriores a la actual
-            date_columns = [col for col in df.columns if col.startswith("2025") and datetime.strptime(col, "%Y-%m-%d") > current_date]
+            date_columns = [col for col in st.session_state.df.columns if col.startswith("2025") and datetime.strptime(col, "%Y-%m-%d") > current_date]
             
-            # Selector de fecha única (actividad del usuario con "CO")
-            user_activity_dates = [col for col in date_columns if "CO" in str(user_row[col])]
-            if user_activity_dates:
-                selected_date = st.selectbox(
-                    "Selecciona la fecha del vuelo que quieres dar:",
-                    options=user_activity_dates,
-                    format_func=lambda x: x,  # Solo mostrar la fecha
-                    key="activity_date"
+            # Usar un formulario para evitar recargas
+            with st.form(key="search_form"):
+                # Selector de fecha única (vuelo que el usuario quiere dar)
+                user_activity_dates = [col for col in date_columns if "CO" in str(user_row[col])]
+                if user_activity_dates:
+                    selected_date = st.selectbox(
+                        "Selecciona la fecha del vuelo que quieres dar:",
+                        options=user_activity_dates,
+                        format_func=lambda x: x,
+                        key="activity_date"
+                    )
+                else:
+                    st.warning("No tienes vuelos con 'CO' en fechas futuras.")
+                    selected_date = None
+
+                # Selector de fechas múltiples (vuelos que el usuario está dispuesto a tomar)
+                available_dates = st.multiselect(
+                    "Selecciona fechas en las que estás dispuesto a hacer el vuelo del compañero:",
+                    options=date_columns,
+                    format_func=lambda x: x,
+                    key="available_dates"
                 )
-            else:
-                st.warning("No tienes actividades con 'CO' en fechas futuras.")
-                selected_date = None
 
-            # Selector de fechas múltiples (fechas en las que el usuario está disponible)
-            available_dates = st.multiselect(
-                "Selecciona fechas en las que estás dispuesto a hacer el vuelo del compañero:",
-                options=date_columns,
-                default=st.session_state.available_dates,
-                format_func=lambda x: x,  # Solo mostrar la fecha
-                key="available_dates"
-            )
+                # Botón "Buscar" dentro del formulario
+                search_button = st.form_submit_button(label="Buscar")
 
-            # Botón "Buscar"
-            search_button = st.button("Buscar")
-
-            # Buscar compañeros para intercambio solo si se presiona el botón
+            # Procesar solo si se presiona "Buscar"
             if search_button and selected_date and available_dates:
-                # Compañeros con "SA" o "LI" en la fecha seleccionada y misma posición
-                potential_swaps = df[
-                    (df[selected_date].str.contains("SA", na=False) | 
-                     df[selected_date].str.contains("LI", na=False)) &
-                    (df['Alias'] != original_best_match) &
-                    (df['Position'] == user_position)  # Filtrar por misma posición
+                potential_swaps = st.session_state.df[
+                    (st.session_state.df[selected_date].str.contains("SA", na=False) | 
+                     st.session_state.df[selected_date].str.contains("LI", na=False)) &
+                    (st.session_state.df['Alias'] != original_best_match) &
+                    (st.session_state.df['Position'] == user_position)
                 ]
 
                 if not potential_swaps.empty:
-                    # Filtrar compañeros que tengan "CO" en alguna de las fechas disponibles
                     swap_candidates = []
                     for index, row in potential_swaps.iterrows():
-                        candidate_activities = [
-                            date for date in available_dates if "CO" in str(row[date])
-                        ]
+                        candidate_activities = [date for date in available_dates if "CO" in str(row[date])]
                         if candidate_activities:
                             swap_candidates.append({
                                 "Alias": row['Alias'],
@@ -196,7 +190,7 @@ if not df.empty:
                         for candidate in swap_candidates:
                             st.write(f"**Alias**: {candidate['Alias']} ({candidate['Position']})")
                             st.write(f"- Libre en: {candidate['Available on']}")
-                            st.write(f"- Actividades disponibles para cubrir:")
+                            st.write(f"- Vuelos disponibles para cubrir:")
                             for date, activity in candidate['Activities'].items():
                                 st.write(f"  - {date}: {activity}")
                             st.write("---")
@@ -208,4 +202,3 @@ if not df.empty:
             st.warning("No se encontró ninguna coincidencia con suficiente similitud.")
     else:
         st.write("Por favor, introduce un alias para buscar.")
-
