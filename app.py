@@ -184,7 +184,7 @@ if not st.session_state.df.empty:
                     if swap_candidates:
                         st.subheader("Posibles compañeros para intercambio:")
                         for candidate in swap_candidates:
-                            st.write(f"**Alias**: {candidate['Alias']} ({candidate['Position']})")
+                            st.write(f"**Alias**: {candidate['Alias']}")
                             st.write(f"- Libre en: {candidate['Available on']}")
                             st.write(f"- Vuelos disponibles para cubrir:")
                             for date, activity in candidate['Activities'].items():
