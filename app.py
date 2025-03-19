@@ -1,3 +1,116 @@
+import pdfplumber
+import pandas as pd
+import streamlit as st
+from datetime import datetime, timedelta
+import re
+from fuzzywuzzy import fuzz, process
+import unicodedata
+
+# Fecha actual del sistema
+current_date = datetime.now()
+
+def extract_date_range(text):
+    """Extrae el rango de fechas del texto y genera una lista de fechas en formato YYYY-MM-DD."""
+    match = re.search(r"(\d{2}/\d{2}/\d{4})-(\d{2}/\d{2}/\d{4})", text)
+    if match:
+        start_date = datetime.strptime(match.group(1), "%d/%m/%Y")
+        end_date = datetime.strptime(match.group(2), "%d/%m/%Y")
+        delta = end_date - start_date
+        date_list = [start_date + timedelta(days=i) for i in range(delta.days + 1)]
+        return date_list
+    return None
+
+def combine_tables(table1, table2, date_list):
+    """Combina dos tablas y normaliza los encabezados."""
+    headers = ["Info"] + [date.strftime("%Y-%m-%d") for date in date_list]
+    data1 = table1[1:]
+    data2 = table2[1:]
+    combined_data = [row1 + row2[1:] for row1, row2 in zip(data1, data2)]
+    return pd.DataFrame(combined_data, columns=headers[:len(table1[0]) + len(table2[0]) - 1])
+
+def normalize_text(text):
+    """Normaliza caracteres (Ñ → N, etc.) y convierte a mayúsculas."""
+    return ''.join(c for c in unicodedata.normalize('NFKD', text) if unicodedata.category(c) != 'Mn').upper()
+
+def extract_alias(info):
+    """Extrae el alias de la cadena completa."""
+    return info.split('\n')[0].strip()
+
+def extract_position(info):
+    """Extrae la posición (COMANDANTE o COPILOTO) de la cadena completa."""
+    lines = info.split('\n')
+    for line in lines:
+        line = line.strip().upper()
+        if "COMANDANTE" in line:
+            return "COMANDANTE"
+        elif "COPILOTO" in line:
+            return "COPILOTO"
+    return "DESCONOCIDO"
+
+# Inicializar session_state para el DataFrame si no existe
+if 'df' not in st.session_state:
+    st.session_state.df = pd.DataFrame()
+
+# Interfaz de Streamlit
+# Mostrar el logo antes del título usando la URL raw de GitHub
+st.image("https://raw.githubusercontent.com/tu_usuario/flight_swap_app/main/assets/logo_sepla.png", use_column_width=True)
+
+st.title("Buscador de Intercambios de Vuelos")
+
+# Permitir al usuario subir el archivo PDF
+uploaded_file = st.file_uploader("Sube la sábana en pdf", type="pdf")
+
+if uploaded_file is not None and st.session_state.df.empty:
+    # Procesamiento del PDF subido
+    try:
+        with pdfplumber.open(uploaded_file) as pdf:
+            tables = []
+            date_range = None
+            
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text and "LISTADO CUADRANTE DE LA PROGRAMACIÓN" in text:
+                    date_range = extract_date_range(text)
+                    break
+            
+            for i in range(0, len(pdf.pages), 2):
+                if i + 1 < len(pdf.pages):
+                    page_even = pdf.pages[i]
+                    table_even = page_even.extract_tables({
+                        "vertical_strategy": "lines",
+                        "horizontal_strategy": "lines"
+                    })[0]
+                    
+                    page_odd = pdf.pages[i + 1]
+                    table_odd = page_odd.extract_tables({
+                        "vertical_strategy": "lines",
+                        "horizontal_strategy": "lines"
+                    })[0]
+                    
+                    if table_even and table_odd and len(table_even) > 1 and len(table_odd) > 1:
+                        combined_df = combine_tables(table_even, table_odd, date_range)
+                        tables.append(combined_df)
+
+            if tables:
+                df = pd.concat(tables, ignore_index=True)
+                df['Alias'] = df['Info'].apply(extract_alias)
+                df['Position'] = df['Info'].apply(extract_position)
+                
+                if df.empty:
+                    st.warning("No hay datos en el PDF procesado.")
+                else:
+                    st.session_state.df = df
+                    df.to_csv("output_with_alias_position.csv", index=False)
+            else:
+                st.warning("No se encontraron tablas válidas para combinar.")
+                st.session_state.df = pd.DataFrame()
+
+    except Exception as e:
+        st.error(f"Error al procesar el PDF: {e}")
+        st.session_state.df = pd.DataFrame()
+elif uploaded_file is None:
+    st.info("Por favor, sube la sábana para continuar.")
+
 # Continuar con la lógica solo si hay un DataFrame válido
 if not st.session_state.df.empty:
     alias_input = st.text_input("Introduce tu alias (e.g., PEDRO LUIS):", "")
