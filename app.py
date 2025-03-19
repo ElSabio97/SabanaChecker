@@ -53,7 +53,7 @@ if 'df' not in st.session_state:
 
 # Interfaz de Streamlit
 # Mostrar el logo antes del título usando la URL raw de GitHub
-st.image("https://raw.githubusercontent.com/tu_usuario/flight_swap_app/main/assets/logo_sepla.png", use_column_width=True)
+st.image("https://raw.githubusercontent.com/ElSabio97/SabanaChecker/main/logo.png", use_column_width=True)
 
 st.title("Buscador de Intercambios de Vuelos")
 
