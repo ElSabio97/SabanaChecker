@@ -52,9 +52,6 @@ if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame()
 
 # Interfaz de Streamlit
-st.title("Buscador de Intercambios de Vuelos")
-
-# Interfaz de Streamlit
 # Mostrar el logo antes del título usando la URL raw de GitHub
 st.image("https://raw.githubusercontent.com/ElSabio97/SabanaChecker/main/logo.png", use_column_width=True)
 
