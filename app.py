@@ -52,9 +52,6 @@ if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame()
 
 # Interfaz de Streamlit
-# Mostrar el logo antes del título usando la URL raw de GitHub
-st.image("https://raw.githubusercontent.com/ElSabio97/SabanaChecker/main/logo.png", use_column_width=True)
-
 st.title("Buscador de Intercambios de Vuelos")
 
 # Permitir al usuario subir el archivo PDF
@@ -127,15 +124,15 @@ if not st.session_state.df.empty:
             original_best_match = st.session_state.df['Alias'].iloc[best_match_index]
             user_row = st.session_state.df[st.session_state.df['Alias'] == original_best_match].iloc[0]
             user_position = user_row['Position']
-            user_in_training = "instruccion" in user_row['Info'].lower()  # Verificar si el usuario está en instrucción
+            user_in_training = "instruccion" in user_row['Info'].lower()
             
             st.write(f"Coincidencia encontrada: '{original_best_match}' (Similitud: {score}%)")
             st.dataframe(user_row.to_frame().T)
 
             # Filtrar fechas posteriores a la actual
             date_columns = [col for col in st.session_state.df.columns if col.startswith("2025") and datetime.strptime(col, "%Y-%m-%d") > current_date]
-
-            # --- Lógica para intercambio de vuelos (CO) ---
+            
+            # Usar un formulario para evitar recargas
             with st.form(key="search_form"):
                 # Selector de fecha única (vuelo que el usuario quiere dar)
                 user_activity_dates = [col for col in date_columns if "CO" in str(user_row[col])]
@@ -166,102 +163,51 @@ if not st.session_state.df.empty:
                 # Filtrar compañeros según "instruccion" además de "SA"/"LI" y posición
                 potential_swaps = st.session_state.df[
                     (st.session_state.df[selected_date].str.contains("SA", na=False) | 
-                     st.session_state.df[selected_date].str.contains("LI", na=False)) &
-                    (st.session_state.df['Alias'] != original_best_match) &
-                    (st.session_state.df['Position'] == user_position) &
+                     st.session_state.df[selected_date].str.contains("LI", na=False)) & 
+                    (st.session_state.df['Alias'] != original_best_match) & 
+                    (st.session_state.df['Position'] == user_position) & 
                     (st.session_state.df['Info'].str.lower().str.contains("instruccion", na=False) == user_in_training)
                 ]
 
                 if not potential_swaps.empty:
-                    swap_candidates = []
-                    for index, row in potential_swaps.iterrows():
-                        candidate_activities = [date for date in available_dates if "CO" in str(row[date])]
-                        if candidate_activities:
-                            swap_candidates.append({
-                                "Alias": row['Alias'],
-                                "Position": row['Position'],
-                                "Available on": selected_date,
-                                "Activities": {date: row[date] for date in candidate_activities}
-                            })
+                    # Separar en SA y LI
+                    sa_swaps = potential_swaps[potential_swaps[selected_date].str.contains("SA", na=False)]
+                    li_swaps = potential_swaps[potential_swaps[selected_date].str.contains("LI", na=False)]
 
-                    if swap_candidates:
-                        st.subheader("Compañeros con SA/LI:")
-                        for candidate in swap_candidates:
-                            st.write(f"**Alias**: {candidate['Alias']}")
-                            st.write(f"- Libre en: {candidate['Available on']}")
-                            st.write(f"- Vuelos disponibles para cubrir:")
-                            for date, activity in candidate['Activities'].items():
-                                st.write(f"  - {date}: {activity}")
-                            st.write("---")
+                    # Preparar datos para tablas
+                    def prepare_table_data(df_subset):
+                        candidates = []
+                        for index, row in df_subset.iterrows():
+                            candidate_activities = [date for date in available_dates if "CO" in str(row[date])]
+                            if candidate_activities:
+                                candidates.append({
+                                    "Alias": row['Alias'],
+                                    "Vuelos disponibles": ", ".join([f"{date}: {row[date]}" for date in candidate_activities])
+                                })
+                        return pd.DataFrame(candidates).set_index("Alias", drop=True)
+
+                    # Mostrar resultados agrupados
+                    if not sa_swaps.empty:
+                        sa_table = prepare_table_data(sa_swaps)
+                        if not sa_table.empty:
+                            st.subheader(f"Compañeros con SA en {selected_date}:")
+                            st.table(sa_table)
+                        else:
+                            st.warning(f"No hay compañeros con SA en {selected_date} con vuelos en las fechas seleccionadas.")
                     else:
-                        st.warning("No hay compañeros con vuelos en las fechas seleccionadas.")
+                        st.warning(f"No hay compañeros con SA en {selected_date}.")
+
+                    if not li_swaps.empty:
+                        li_table = prepare_table_data(li_swaps)
+                        if not li_table.empty:
+                            st.subheader(f"Compañeros con LI en {selected_date}:")
+                            st.table(li_table)
+                        else:
+                            st.warning(f"No hay compañeros con LI en {selected_date} con vuelos en las fechas seleccionadas.")
+                    else:
+                        st.warning(f"No hay compañeros con LI en {selected_date}.")
                 else:
                     st.warning(f"No hay compañeros con 'SA' o 'LI' en {selected_date} que también estén en instrucción.")
-
-            # --- Lógica para intercambio de Imaginaria (IM) ---
-            st.subheader("Intercambio de Turnos de Imaginaria (IM)")
-
-            with st.form(key="search_form_im"):
-                # Selector de fecha única (Imaginaria que el usuario quiere dar)
-                user_im_dates = [col for col in date_columns if "IM" in str(user_row[col])]
-                if user_im_dates:
-                    selected_im_date = st.selectbox(
-                        "Selecciona la fecha de tu Imaginaria que quieres dar:",
-                        options=user_im_dates,
-                        format_func=lambda x: x,
-                        key="im_date"
-                    )
-                else:
-                    st.warning("No tienes turnos de Imaginaria (IM) en fechas futuras.")
-                    selected_im_date = None
-
-                # Selector de fechas múltiples (Imaginaria que el usuario está dispuesto a tomar)
-                available_im_dates = st.multiselect(
-                    "Selecciona fechas en las que estás dispuesto a hacer la Imaginaria del compañero:",
-                    options=date_columns,
-                    format_func=lambda x: x,
-                    key="available_im_dates"
-                )
-
-                # Botón "Buscar" dentro del formulario para Imaginaria
-                search_im_button = st.form_submit_button(label="Buscar compañeros para Imaginaria")
-
-            # Procesar solo si se presiona "Buscar" para Imaginaria
-            if search_im_button and selected_im_date and available_im_dates:
-                # Filtrar compañeros según "instruccion" además de "SA"/"LI" y posición
-                potential_im_swaps = st.session_state.df[
-                    (st.session_state.df[selected_im_date].str.contains("SA", na=False) | 
-                     st.session_state.df[selected_im_date].str.contains("LI", na=False)) &
-                    (st.session_state.df['Alias'] != original_best_match) &
-                    (st.session_state.df['Position'] == user_position) &
-                    (st.session_state.df['Info'].str.lower().str.contains("instruccion", na=False) == user_in_training)
-                ]
-
-                if not potential_im_swaps.empty:
-                    im_swap_candidates = []
-                    for index, row in potential_im_swaps.iterrows():
-                        candidate_im_activities = [date for date in available_im_dates if "IM" in str(row[date])]
-                        if candidate_im_activities:
-                            im_swap_candidates.append({
-                                "Alias": row['Alias'],
-                                "Position": row['Position'],
-                                "Available on": selected_im_date,
-                                "Activities": {date: row[date] for date in candidate_im_activities}
-                            })
-
-                    if im_swap_candidates:
-                        st.subheader("Posibles compañeros para intercambio de Imaginaria:")
-                        for candidate in im_swap_candidates:
-                            st.write(f"**Alias**: {candidate['Alias']}")
-                            st.write(f"- Libre en: {candidate['Available on']}")
-                            st.write(f"- Turnos de Imaginaria disponibles para cubrir:")
-                            for date, activity in candidate['Activities'].items():
-                                st.write(f"  - {date}: {activity}")
-                            st.write("---")
-                    else:
-                        st.warning("No hay compañeros con Imaginaria en las fechas seleccionadas.")
-                else:
-                    st.warning(f"No hay compañeros con 'SA' o 'LI' en {selected_im_date} que también estén en instrucción.")
         else:
             st.warning("No se encontró ninguna coincidencia con suficiente similitud.")
     else:
