@@ -165,9 +165,6 @@ if not st.session_state.df.empty:
 
             # Procesar solo si se presiona "Buscar"
             if search_button and selected_date and available_dates:
-                # Reset selections on new search
-                st.session_state.selected_companions = {}
-                
                 # Filtrar compañeros según "instruccion" además de "SA"/"LI" y posición
                 potential_swaps = st.session_state.df[
                     (st.session_state.df[selected_date].str.contains("SA", na=False) | 
@@ -201,8 +198,13 @@ if not st.session_state.df.empty:
                             for index, row in sa_table.iterrows():
                                 alias = row['Alias']
                                 checkbox_key = f"sa_{alias}_{selected_date}"
-                                is_selected = st.session_state.selected_companions.get(checkbox_key, False)
-                                if st.checkbox(f"{alias} ({row['Vuelos disponibles']})", value=is_selected, key=checkbox_key):
+                                # Initialize checkbox state if not present
+                                if checkbox_key not in st.session_state.selected_companions:
+                                    st.session_state.selected_companions[checkbox_key] = False
+                                # Render checkbox and update state
+                                if st.checkbox(f"{alias} ({row['Vuelos disponibles']})", 
+                                             value=st.session_state.selected_companions[checkbox_key], 
+                                             key=checkbox_key):
                                     st.session_state.selected_companions[checkbox_key] = True
                                 else:
                                     st.session_state.selected_companions[checkbox_key] = False
@@ -218,8 +220,13 @@ if not st.session_state.df.empty:
                             for index, row in li_table.iterrows():
                                 alias = row['Alias']
                                 checkbox_key = f"li_{alias}_{selected_date}"
-                                is_selected = st.session_state.selected_companions.get(checkbox_key, False)
-                                if st.checkbox(f"{alias} ({row['Vuelos disponibles']})", value=is_selected, key=checkbox_key):
+                                # Initialize checkbox state if not present
+                                if checkbox_key not in st.session_state.selected_companions:
+                                    st.session_state.selected_companions[checkbox_key] = False
+                                # Render checkbox and update state
+                                if st.checkbox(f"{alias} ({row['Vuelos disponibles']})", 
+                                             value=st.session_state.selected_companions[checkbox_key], 
+                                             key=checkbox_key):
                                     st.session_state.selected_companions[checkbox_key] = True
                                 else:
                                     st.session_state.selected_companions[checkbox_key] = False
