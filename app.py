@@ -52,6 +52,9 @@ def format_flight_info(flight_str):
     if not flight_str or flight_str.isspace():
         return "Sin información"
     
+    # Reemplazar '#' por un espacio en blanco
+    flight_str = flight_str.replace('#', ' ')
+    
     # Dividir la cadena en partes
     parts = flight_str.split()
     if len(parts) < 2:
@@ -65,12 +68,10 @@ def format_flight_info(flight_str):
     airports = []
     times = []
     for item in flight_data:
-        # Eliminar caracteres como '#' de los códigos de aeropuerto
-        cleaned_item = re.sub(r'[^A-Z0-9]', '', item)
-        if re.match(r'^[A-Z]{3}$', cleaned_item):  # Códigos de aeropuerto (3 letras)
-            airports.append(cleaned_item)
-        elif re.match(r'^\d{4}$', cleaned_item):  # Horas (4 dígitos)
-            times.append(cleaned_item)
+        if re.match(r'^[A-Z]{3}$', item):  # Códigos de aeropuerto (3 letras)
+            airports.append(item)
+        elif re.match(r'^\d{4}$', item):  # Horas (4 dígitos)
+            times.append(item)
     
     # Ignorar códigos adicionales al final (como L00745 A00715)
     # Asumimos que los aeropuertos están seguidos por sus horas de salida/llegada
