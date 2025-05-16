@@ -47,21 +47,54 @@ def extract_position(info):
             return "COPILOTO"
     return "DESCONOCIDO"
 
+def parse_flight_itinerary(itinerary):
+    """Parsea una cadena de itinerario en una lista de segmentos de vuelo."""
+    if not isinstance(itinerary, str) or not itinerary.startswith("CO"):
+        return []
+    
+    # Expresión regular para capturar segmentos de vuelo (origen, hora salida, hora llegada, destino)
+    pattern = r"([A-Z]{3})\s(\d{4})\s(\d{4})\s([A-Z]{3})"
+    segments = re.findall(pattern, itinerary)
+    
+    # Capturar códigos de vuelo al final (e.g., L00745, A00715)
+    flight_codes = re.findall(r"[A-Z]\d{5}", itinerary)
+    
+    # Crear lista de segmentos con formato legible
+    parsed_segments = []
+    for i, (origin, dep_time, arr_time, dest) in enumerate(segments):
+        flight_code = flight_codes[i] if i < len(flight_codes) else "N/A"
+        parsed_segments.append({
+            "Segmento": i + 1,
+            "Origen": origin,
+            "Salida": f"{dep_time[:2]}:{dep_time[2:]}",
+            "Destino": dest,
+            "Llegada": f"{arr_time[:2]}:{arr_time[2:]}",
+            "Vuelo": flight_code
+        })
+    return parsed_segments
+
+def display_itinerary(itinerary, title="Itinerario"):
+    """Muestra un itinerario parseado como una tabla en Streamlit."""
+    segments = parse_flight_itinerary(itinerary)
+    if segments:
+        st.subheader(title)
+        df = pd.DataFrame(segments)
+        st.table(df)
+    else:
+        st.write("No hay itinerario válido para mostrar.")
+
 # Inicializar session_state para el DataFrame si no existe
 if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame()
 
 # Interfaz de Streamlit
-# Mostrar el logo antes del título usando la URL raw de GitHub
 st.image("https://raw.githubusercontent.com/ElSabio97/SabanaChecker/main/logo.png", use_column_width=True)
-
 st.title("Buscador de Intercambios de Vuelos")
 
 # Permitir al usuario subir el archivo PDF
 uploaded_file = st.file_uploader("Sube la sábana en pdf", type="pdf")
 
 if uploaded_file is not None and st.session_state.df.empty:
-    # Procesamiento del PDF subido
     try:
         with pdfplumber.open(uploaded_file) as pdf:
             tables = []
@@ -121,7 +154,7 @@ if not st.session_state.df.empty:
         aliases_normalized = [normalize_text(alias) for alias in aliases_original]
         matches = process.extractOne(alias_normalized, aliases_normalized, scorer=fuzz.token_sort_ratio)
         
-        if matches and matches[1] >= 50:
+        if matches and matches[1] >= 70:  # Aumentado el umbral para mayor precisión
             best_match, score = matches
             best_match_index = aliases_normalized.index(best_match)
             original_best_match = st.session_state.df['Alias'].iloc[best_match_index]
@@ -130,14 +163,16 @@ if not st.session_state.df.empty:
             user_in_training = "instruccion" in user_row['Info'].lower()
             
             st.write(f"Coincidencia encontrada: '{original_best_match}' (Similitud: {score}%)")
-            st.dataframe(user_row.to_frame().T)
-
+            # Mostrar información del usuario
+            st.subheader("Tu información")
+            st.write(f"Posición: {user_position}")
+            st.write(f"En instrucción: {'Sí' if user_in_training else 'No'}")
+            # Mostrar itinerario del usuario para la fecha seleccionada (posteriormente)
+            
             # Filtrar fechas posteriores a la actual
             date_columns = [col for col in st.session_state.df.columns if col.startswith("2025") and datetime.strptime(col, "%Y-%m-%d") > current_date]
             
-            # Usar un formulario para evitar recargas
             with st.form(key="search_form"):
-                # Selector de fecha única (vuelo que el usuario quiere dar)
                 user_activity_dates = [col for col in date_columns if "CO" in str(user_row[col])]
                 if user_activity_dates:
                     selected_date = st.selectbox(
@@ -146,12 +181,12 @@ if not st.session_state.df.empty:
                         format_func=lambda x: x,
                         key="activity_date"
                     )
+                    # Mostrar itinerario del usuario para la fecha seleccionada
+                    display_itinerary(user_row[selected_date], f"Tu itinerario para {selected_date}")
                 else:
                     st.warning("No tienes vuelos con 'CO' en fechas futuras.")
                     selected_date = None
 
-                # Selector de fechas múltiples (vuelos que el usuario está dispuesto a tomar)
-                # Excluir la fecha seleccionada y filtrar solo fechas con "SA" o "LI" para el usuario
                 available_dates_options = [
                     date for date in date_columns
                     if date != selected_date and (
@@ -165,12 +200,9 @@ if not st.session_state.df.empty:
                     key="available_dates"
                 )
 
-                # Botón "Buscar" dentro del formulario
                 search_button = st.form_submit_button(label="Buscar")
 
-            # Procesar solo si se presiona "Buscar"
             if search_button and selected_date and available_dates:
-                # Filtrar compañeros según "instruccion" además de "SA"/"LI" y posición
                 potential_swaps = st.session_state.df[
                     (st.session_state.df[selected_date].str.contains("SA", na=False) | 
                      st.session_state.df[selected_date].str.contains("LI", na=False)) & 
@@ -180,28 +212,40 @@ if not st.session_state.df.empty:
                 ]
 
                 if not potential_swaps.empty:
-                    # Separar en SA y LI
                     sa_swaps = potential_swaps[potential_swaps[selected_date].str.contains("SA", na=False)]
                     li_swaps = potential_swaps[potential_swaps[selected_date].str.contains("LI", na=False)]
 
-                    # Preparar datos para tablas
                     def prepare_table_data(df_subset):
                         candidates = []
                         for index, row in df_subset.iterrows():
                             candidate_activities = [date for date in available_dates if "CO" in str(row[date])]
                             if candidate_activities:
-                                candidates.append({
-                                    "Alias": row['Alias'],
-                                    "Vuelos disponibles": ", ".join([f"{date}: {row[date]}" for date in candidate_activities])
-                                })
+                                for date in candidate_activities:
+                                    segments = parse_flight_itinerary(row[date])
+                                    itinerary_str = "; ".join(
+                                        [f"Segmento {seg['Segmento']}: {seg['Origen']} {seg['Salida']} -> {seg['Destino']} {seg['Llegada']} ({seg['Vuelo']})"
+                                         for seg in segments]
+                                    )
+                                    candidates.append({
+                                        "Alias": row['Alias'],
+                                        "Fecha": date,
+                                        "Itinerario": itinerary_str
+                                    })
                         return pd.DataFrame(candidates).set_index("Alias", drop=True)
 
-                    # Mostrar resultados agrupados
                     if not sa_swaps.empty:
                         sa_table = prepare_table_data(sa_swaps)
                         if not sa_table.empty:
                             st.subheader(f"Compañeros con SA en {selected_date}:")
                             st.table(sa_table)
+                            # Botón para descargar resultados
+                            csv = sa_table.to_csv()
+                            st.download_button(
+                                label="Descargar resultados SA",
+                                data=csv,
+                                file_name=f"intercambios_SA_{selected_date}.csv",
+                                mime="text/csv"
+                            )
                         else:
                             st.warning(f"No hay compañeros con SA en {selected_date} con vuelos en las fechas seleccionadas.")
                     else:
@@ -212,6 +256,12 @@ if not st.session_state.df.empty:
                         if not li_table.empty:
                             st.subheader(f"Compañeros con LI en {selected_date}:")
                             st.table(li_table)
+                            st.download_button(
+                                label="Descargar resultados LI",
+                                data=li_table.to_csv(),
+                                file_name=f"intercambios_LI_{selected_date}.csv",
+                                mime="text/csv"
+                            )
                         else:
                             st.warning(f"No hay compañeros con LI en {selected_date} con vuelos en las fechas seleccionadas.")
                     else:
