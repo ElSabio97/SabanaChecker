@@ -47,37 +47,44 @@ def extract_position(info):
             return "COPILOTO"
     return "DESCONOCIDO"
 
-def format_flight_info(flight_text):
-    """Formatea la información de vuelo para mostrar solo el recorrido y las horas de salida/llegada."""
-    if not isinstance(flight_text, str):
+def format_flight_info(flight_str):
+    """Procesa la cadena de vuelo para extraer el recorrido y las horas de salida/llegada."""
+    if not flight_str or flight_str.isspace():
         return "Sin información"
     
-    # Dividir el texto en líneas y filtrar las que contienen códigos no deseados
-    lines = [line.strip() for line in flight_text.split('\n') if line.strip() and not re.match(r"^[A-Z]\d{5}", line)]
+    # Dividir la cadena en partes
+    parts = flight_str.split()
+    if len(parts) < 2:
+        return "Formato inválido"
     
-    if not lines:
-        return "Sin información"
+    # Extraer el código inicial (CO, SA, LI, etc.) y el resto
+    code = parts[0]
+    flight_data = parts[1:]
     
-    # Extraer códigos de aeropuerto y horas
+    # Filtrar solo los códigos de aeropuerto (3 letras) y horas (4 dígitos)
     airports = []
     times = []
-    for line in lines:
-        parts = line.split()
-        if len(parts) >= 2 and re.match(r"^[A-Z]{3}$", parts[1]) and re.match(r"^\d{4}$", parts[2]):
-            airports.append(parts[1])
-            times.append(parts[2])
+    for item in flight_data:
+        if re.match(r'^[A-Z]{3}$', item):  # Códigos de aeropuerto (3 letras)
+            airports.append(item)
+        elif re.match(r'^\d{4}$', item):  # Horas (4 dígitos)
+            times.append(item)
     
+    # Ignorar códigos adicionales al final (como L00745 A00715)
+    # Asumimos que los aeropuertos están seguidos por sus horas de salida/llegada
     if not airports or not times:
-        return "Sin información"
+        return "Sin datos válidos"
     
-    # Crear el recorrido (MAD - VLC - PMI - VLC - MAD)
+    # Construir el recorrido (MAD - VLC - PMI - VLC - MAD)
     route = " - ".join(airports)
     
-    # Obtener la hora de salida del primer vuelo y la de llegada del último
-    start_time = times[0][:2] + ":" + times[0][2:]
-    end_time = times[-1][:2] + ":" + times[-1][2:]
+    # Formatear las horas: primera salida y última llegada
+    if len(times) >= 2:
+        start_time = f"{times[0][:2]}:{times[0][2:]}"
+        end_time = f"{times[-1][:2]}:{times[-1][2:]}"
+        return f"{route} ({start_time} - {end_time})"
     
-    return f"{route} ({start_time} - {end_time})"
+    return route
 
 # Inicializar session_state para el DataFrame si no existe
 if 'df' not in st.session_state:
@@ -220,15 +227,12 @@ if not st.session_state.df.empty:
                     def prepare_table_data(df_subset):
                         candidates = []
                         for index, row in df_subset.iterrows():
-                            candidate_activities = [
-                                date for date in available_dates if "CO" in str(row[date])
-                            ]
+                            candidate_activities = [date for date in available_dates if "CO" in str(row[date])]
                             if candidate_activities:
+                                formatted_activities = [f"{date}: {format_flight_info(str(row[date]))}" for date in candidate_activities]
                                 candidates.append({
                                     "Alias": row['Alias'],
-                                    "Vuelos disponibles": ", ".join([
-                                        format_flight_info(row[date]) for date in candidate_activities
-                                    ])
+                                    "Vuelos disponibles": ", ".join(formatted_activities)
                                 })
                         return pd.DataFrame(candidates).set_index("Alias", drop=True)
 
