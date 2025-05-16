@@ -234,11 +234,11 @@ if not st.session_state.df.empty:
                             for date in candidate_activities:
                                 day = str(datetime.strptime(date, "%Y-%m-%d").day)
                                 candidates.append({
-                                    "Día": day,
+                                    "Día del Mes": day,
                                     "Alias": row['Alias'],
                                     "Vuelos disponibles": f"{format_flight_info(str(row[date]))}"
                                 })
-                        return pd.DataFrame(candidates).set_index(["Día", "Alias"])
+                        return pd.DataFrame(candidates).set_index(["Día del Mes", "Alias"])
 
                     # Mostrar resultados agrupados
                     if not sa_swaps.empty:
