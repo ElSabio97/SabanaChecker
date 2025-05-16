@@ -56,21 +56,20 @@ def parse_flight_itinerary(itinerary):
     pattern = r"([A-Z]{3})\s(\d{4})\s(\d{4})\s([A-Z]{3})"
     segments = re.findall(pattern, itinerary)
     
-    # Capturar códigos de vuelo al final (e.g., L00745, A00715)
-    flight_codes = re.findall(r"[A-Z]\d{5}", itinerary)
-    
     # Crear lista de segmentos con formato legible
     parsed_segments = []
     for i, (origin, dep_time, arr_time, dest) in enumerate(segments):
-        flight_code = flight_codes[i] if i < len(flight_codes) else "N/A"
         parsed_segments.append({
-            "Segmento": i + 1,
+            "Vuelo": i + 1,
             "Origen": origin,
-            "Salida": f"{dep_time[:2]}:{dep_time[2:]}",
-            "Destino": dest,
-            "Llegada": f"{arr_time[:2]}:{arr_time[2:]}",
-            "Vuelo": flight_code
+            "Destino": dest
         })
+    
+    # Agregar horas solo para el primer y último segmento
+    if parsed_segments:
+        parsed_segments[0]["Salida"] = f"{segments[0][1][:2]}:{segments[0][1][2:]}"
+        parsed_segments[-1]["Llegada"] = f"{segments[-1][2][:2]}:{segments[-1][2][2:]}"
+    
     return parsed_segments
 
 def display_itinerary(itinerary, title="Itinerario"):
@@ -79,7 +78,10 @@ def display_itinerary(itinerary, title="Itinerario"):
     if segments:
         st.subheader(title)
         df = pd.DataFrame(segments)
-        st.table(df)
+        # Reordenar columnas para mostrar Vuelo, Origen, Salida, Destino, Llegada
+        columns = ["Vuelo", "Origen", "Salida", "Destino", "Llegada"]
+        df = df[[col for col in columns if col in df.columns]]
+        st.table(df.fillna(""))
     else:
         st.write("No hay itinerario válido para mostrar.")
 
@@ -154,7 +156,7 @@ if not st.session_state.df.empty:
         aliases_normalized = [normalize_text(alias) for alias in aliases_original]
         matches = process.extractOne(alias_normalized, aliases_normalized, scorer=fuzz.token_sort_ratio)
         
-        if matches and matches[1] >= 70:  # Aumentado el umbral para mayor precisión
+        if matches and matches[1] >= 70:
             best_match, score = matches
             best_match_index = aliases_normalized.index(best_match)
             original_best_match = st.session_state.df['Alias'].iloc[best_match_index]
@@ -163,14 +165,14 @@ if not st.session_state.df.empty:
             user_in_training = "instruccion" in user_row['Info'].lower()
             
             st.write(f"Coincidencia encontrada: '{original_best_match}' (Similitud: {score}%)")
-            # Mostrar información del usuario
             st.subheader("Tu información")
             st.write(f"Posición: {user_position}")
             st.write(f"En instrucción: {'Sí' if user_in_training else 'No'}")
-            # Mostrar itinerario del usuario para la fecha seleccionada (posteriormente)
             
             # Filtrar fechas posteriores a la actual
             date_columns = [col for col in st.session_state.df.columns if col.startswith("2025") and datetime.strptime(col, "%Y-%m-%d") > current_date]
+            # Mapear fechas a solo el día del mes
+            date_display_map = {col: datetime.strptime(col, "%Y-%m-%d").strftime("%d") for col in date_columns}
             
             with st.form(key="search_form"):
                 user_activity_dates = [col for col in date_columns if "CO" in str(user_row[col])]
@@ -178,11 +180,10 @@ if not st.session_state.df.empty:
                     selected_date = st.selectbox(
                         "Selecciona la fecha del vuelo que quieres dar:",
                         options=user_activity_dates,
-                        format_func=lambda x: x,
+                        format_func=lambda x: date_display_map[x],
                         key="activity_date"
                     )
-                    # Mostrar itinerario del usuario para la fecha seleccionada
-                    display_itinerary(user_row[selected_date], f"Tu itinerario para {selected_date}")
+                    display_itinerary(user_row[selected_date], f"Tu itinerario para el día {date_display_map[selected_date]}")
                 else:
                     st.warning("No tienes vuelos con 'CO' en fechas futuras.")
                     selected_date = None
@@ -196,7 +197,7 @@ if not st.session_state.df.empty:
                 available_dates = st.multiselect(
                     "Selecciona fechas en las que estás dispuesto a hacer el vuelo del compañero:",
                     options=available_dates_options,
-                    format_func=lambda x: x,
+                    format_func=lambda x: date_display_map[x],
                     key="available_dates"
                 )
 
@@ -223,12 +224,15 @@ if not st.session_state.df.empty:
                                 for date in candidate_activities:
                                     segments = parse_flight_itinerary(row[date])
                                     itinerary_str = "; ".join(
-                                        [f"Segmento {seg['Segmento']}: {seg['Origen']} {seg['Salida']} -> {seg['Destino']} {seg['Llegada']} ({seg['Vuelo']})"
+                                        [f"Vuelo {seg['Vuelo']}: {seg['Origen']} -> {seg['Destino']}"
                                          for seg in segments]
                                     )
+                                    # Agregar horas para el primer y último segmento
+                                    if segments:
+                                        itinerary_str += f" (Salida: {segments[0].get('Salida', '')}, Llegada: {segments[-1].get('Llegada', '')})"
                                     candidates.append({
                                         "Alias": row['Alias'],
-                                        "Fecha": date,
+                                        "Fecha": date_display_map[date],
                                         "Itinerario": itinerary_str
                                     })
                         return pd.DataFrame(candidates).set_index("Alias", drop=True)
@@ -236,38 +240,37 @@ if not st.session_state.df.empty:
                     if not sa_swaps.empty:
                         sa_table = prepare_table_data(sa_swaps)
                         if not sa_table.empty:
-                            st.subheader(f"Compañeros con SA en {selected_date}:")
+                            st.subheader(f"Compañeros con SA en el día {date_display_map[selected_date]}:")
                             st.table(sa_table)
-                            # Botón para descargar resultados
                             csv = sa_table.to_csv()
                             st.download_button(
                                 label="Descargar resultados SA",
                                 data=csv,
-                                file_name=f"intercambios_SA_{selected_date}.csv",
+                                file_name=f"intercambios_SA_dia_{date_display_map[selected_date]}.csv",
                                 mime="text/csv"
                             )
                         else:
-                            st.warning(f"No hay compañeros con SA en {selected_date} con vuelos en las fechas seleccionadas.")
+                            st.warning(f"No hay compañeros con SA en el día {date_display_map[selected_date]} con vuelos en las fechas seleccionadas.")
                     else:
-                        st.warning(f"No hay compañeros con SA en {selected_date}.")
+                        st.warning(f"No hay compañeros con SA en el día {date_display_map[selected_date]}.")
 
                     if not li_swaps.empty:
                         li_table = prepare_table_data(li_swaps)
                         if not li_table.empty:
-                            st.subheader(f"Compañeros con LI en {selected_date}:")
+                            st.subheader(f"Compañeros con LI en el día {date_display_map[selected_date]}:")
                             st.table(li_table)
                             st.download_button(
                                 label="Descargar resultados LI",
                                 data=li_table.to_csv(),
-                                file_name=f"intercambios_LI_{selected_date}.csv",
+                                file_name=f"intercambios_LI_dia_{date_display_map[selected_date]}.csv",
                                 mime="text/csv"
                             )
                         else:
-                            st.warning(f"No hay compañeros con LI en {selected_date} con vuelos en las fechas seleccionadas.")
+                            st.warning(f"No hay compañeros con LI en el día {date_display_map[selected_date]} con vuelos en las fechas seleccionadas.")
                     else:
-                        st.warning(f"No hay compañeros con LI en {selected_date}.")
+                        st.warning(f"No hay compañeros con LI en el día {date_display_map[selected_date]}.")
                 else:
-                    st.warning(f"No hay compañeros con 'SA' o 'LI' en {selected_date} que también estén en instrucción.")
+                    st.warning(f"No hay compañeros con 'SA' o 'LI' en el día {date_display_map[selected_date]} que también estén en instrucción.")
         else:
             st.warning("No se encontró ninguna coincidencia con suficiente similitud.")
     else:
