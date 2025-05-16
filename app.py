@@ -151,8 +151,13 @@ if not st.session_state.df.empty:
                     selected_date = None
 
                 # Selector de fechas múltiples (vuelos que el usuario está dispuesto a tomar)
-                # Excluir la fecha seleccionada en el selectbox de las opciones del multiselect
-                available_dates_options = [date for date in date_columns if date != selected_date]
+                # Excluir la fecha seleccionada y filtrar solo fechas con "SA" o "LI" para el usuario
+                available_dates_options = [
+                    date for date in date_columns
+                    if date != selected_date and (
+                        "SA" in str(user_row[date]) or "LI" in str(user_row[date])
+                    )
+                ]
                 available_dates = st.multiselect(
                     "Selecciona fechas en las que estás dispuesto a hacer el vuelo del compañero:",
                     options=available_dates_options,
