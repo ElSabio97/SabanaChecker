@@ -47,11 +47,9 @@ def extract_position(info):
             return "COPILOTO"
     return "DESCONOCIDO"
 
-# Inicializar session_state para el DataFrame y selected_companions si no existen
+# Inicializar session_state para el DataFrame si no existe
 if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame()
-if 'selected_companions' not in st.session_state:
-    st.session_state.selected_companions = {}
 
 # Interfaz de Streamlit
 # Mostrar el logo antes del título usando la URL raw de GitHub
@@ -153,9 +151,11 @@ if not st.session_state.df.empty:
                     selected_date = None
 
                 # Selector de fechas múltiples (vuelos que el usuario está dispuesto a tomar)
+                # Excluir la fecha seleccionada en el selectbox de las opciones del multiselect
+                available_dates_options = [date for date in date_columns if date != selected_date]
                 available_dates = st.multiselect(
                     "Selecciona fechas en las que estás dispuesto a hacer el vuelo del compañero:",
-                    options=date_columns,
+                    options=available_dates_options,
                     format_func=lambda x: x,
                     key="available_dates"
                 )
@@ -174,82 +174,43 @@ if not st.session_state.df.empty:
                     (st.session_state.df['Info'].str.lower().str.contains("instruccion", na=False) == user_in_training)
                 ]
 
-                def prepare_table_data(df_subset, available_dates):
-                    candidates = []
-                    for index, row in df_subset.iterrows():
-                        candidate_activities = [date for date in available_dates if "CO" in str(row[date])]
-                        if candidate_activities:
-                            candidates.append({
-                                "Alias": row['Alias'],
-                                "Vuelos disponibles": ", ".join([f"{date}: {row[date]}" for date in candidate_activities])
-                            })
-                    return pd.DataFrame(candidates)
-
                 if not potential_swaps.empty:
                     # Separar en SA y LI
                     sa_swaps = potential_swaps[potential_swaps[selected_date].str.contains("SA", na=False)]
                     li_swaps = potential_swaps[potential_swaps[selected_date].str.contains("LI", na=False)]
 
+                    # Preparar datos para tablas
+                    def prepare_table_data(df_subset):
+                        candidates = []
+                        for index, row in df_subset.iterrows():
+                            candidate_activities = [date for date in available_dates if "CO" in str(row[date])]
+                            if candidate_activities:
+                                candidates.append({
+                                    "Alias": row['Alias'],
+                                    "Vuelos disponibles": ", ".join([f"{date}: {row[date]}" for date in candidate_activities])
+                                })
+                        return pd.DataFrame(candidates).set_index("Alias", drop=True)
+
                     # Mostrar resultados agrupados
                     if not sa_swaps.empty:
-                        sa_table = prepare_table_data(sa_swaps, available_dates)
+                        sa_table = prepare_table_data(sa_swaps)
                         if not sa_table.empty:
                             st.subheader(f"Compañeros con SA en {selected_date}:")
-                            for index, row in sa_table.iterrows():
-                                alias = row['Alias']
-                                checkbox_key = f"sa_{alias}_{selected_date}"
-                                # Initialize checkbox state if not present
-                                if checkbox_key not in st.session_state.selected_companions:
-                                    st.session_state.selected_companions[checkbox_key] = False
-                                # Render checkbox and update state
-                                if st.checkbox(f"{alias} ({row['Vuelos disponibles']})", 
-                                             value=st.session_state.selected_companions[checkbox_key], 
-                                             key=checkbox_key):
-                                    st.session_state.selected_companions[checkbox_key] = True
-                                else:
-                                    st.session_state.selected_companions[checkbox_key] = False
+                            st.table(sa_table)
                         else:
                             st.warning(f"No hay compañeros con SA en {selected_date} con vuelos en las fechas seleccionadas.")
                     else:
                         st.warning(f"No hay compañeros con SA en {selected_date}.")
 
                     if not li_swaps.empty:
-                        li_table = prepare_table_data(li_swaps, available_dates)
+                        li_table = prepare_table_data(li_swaps)
                         if not li_table.empty:
                             st.subheader(f"Compañeros con LI en {selected_date}:")
-                            for index, row in li_table.iterrows():
-                                alias = row['Alias']
-                                checkbox_key = f"li_{alias}_{selected_date}"
-                                # Initialize checkbox state if not present
-                                if checkbox_key not in st.session_state.selected_companions:
-                                    st.session_state.selected_companions[checkbox_key] = False
-                                # Render checkbox and update state
-                                if st.checkbox(f"{alias} ({row['Vuelos disponibles']})", 
-                                             value=st.session_state.selected_companions[checkbox_key], 
-                                             key=checkbox_key):
-                                    st.session_state.selected_companions[checkbox_key] = True
-                                else:
-                                    st.session_state.selected_companions[checkbox_key] = False
+                            st.table(li_table)
                         else:
                             st.warning(f"No hay compañeros con LI en {selected_date} con vuelos en las fechas seleccionadas.")
                     else:
                         st.warning(f"No hay compañeros con LI en {selected_date}.")
-
-                    # Display dynamic list of selected companions
-                    st.subheader("Compañeros seleccionados para contactar:")
-                    selected_aliases = [
-                        key.split("_")[1] for key, value in st.session_state.selected_companions.items() if value
-                    ]
-                    if selected_aliases:
-                        for alias in selected_aliases:
-                            st.write(f"- {alias}")
-                    else:
-                        st.info("No hay compañeros seleccionados.")
-
-                    # Add reset button
-                    if st.button("Limpiar selecciones"):
-                        st.session_state.selected_companions = {}
-                        st.rerun()
                 else:
                     st.warning(f"No hay compañeros con 'SA' o 'LI' en {selected_date} que también estén en instrucción.")
         else:
