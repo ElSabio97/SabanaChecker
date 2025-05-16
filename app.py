@@ -65,17 +65,19 @@ def format_flight_info(flight_str):
     airports = []
     times = []
     for item in flight_data:
-        if re.match(r'^[A-Z]{3}$', item):  # Códigos de aeropuerto (3 letras)
-            airports.append(item)
-        elif re.match(r'^\d{4}$', item):  # Horas (4 dígitos)
-            times.append(item)
+        # Eliminar caracteres como '#' de los códigos de aeropuerto
+        cleaned_item = re.sub(r'[^A-Z0-9]', '', item)
+        if re.match(r'^[A-Z]{3}$', cleaned_item):  # Códigos de aeropuerto (3 letras)
+            airports.append(cleaned_item)
+        elif re.match(r'^\d{4}$', cleaned_item):  # Horas (4 dígitos)
+            times.append(cleaned_item)
     
     # Ignorar códigos adicionales al final (como L00745 A00715)
     # Asumimos que los aeropuertos están seguidos por sus horas de salida/llegada
     if not airports or not times:
         return "Sin datos válidos"
     
-    # Construir el recorrido (MAD - VLC - PMI - VLC - MAD)
+    # Construir el recorrido (MAD - VCE - MAD)
     route = " - ".join(airports)
     
     # Formatear las horas: primera salida y última llegada
