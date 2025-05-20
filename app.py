@@ -141,7 +141,6 @@ if uploaded_files and st.session_state.df.empty:
                 df['Alias'] = df['Alias'].apply(normalize_text)
             
             # Combinar DataFrames
-            df_combined = all_tables[0]
             common_cols = ['Alias', 'Position', 'Info']
             date_cols_all = set()
             
@@ -149,14 +148,17 @@ if uploaded_files and st.session_state.df.empty:
             for df in all_tables:
                 date_cols_all.update([col for col in df.columns if col not in common_cols])
             
+            # Ordenar columnas de fechas cronológicamente
+            date_cols_all = sorted(date_cols_all, key=lambda x: datetime.strptime(x, "%Y-%m-%d"))
+            
             # Inicializar DataFrame combinado con todas las columnas de fechas
-            df_combined = df_combined.reindex(columns=common_cols + list(date_cols_all))
+            df_combined = all_tables[0].reindex(columns=common_cols + date_cols_all)
             
             # Fusionar cada DataFrame adicional
             for df in all_tables[1:]:
                 date_cols = [col for col in df.columns if col not in common_cols]
                 temp_df = df[common_cols + date_cols].copy()
-                temp_df = temp_df.reindex(columns=common_cols + list(date_cols_all))
+                temp_df = temp_df.reindex(columns=common_cols + date_cols_all)
                 df_combined = pd.concat([df_combined, temp_df], ignore_index=True)
             
             # Consolidar filas por Alias
@@ -261,6 +263,9 @@ if not st.session_state.df.empty:
                                     "Alias": row['Alias'],
                                     "Vuelos disponibles": f"{format_flight_info(str(row[date]))}"
                                 })
+                        # Si no hay candidatos, devolver DataFrame vacío con columnas correctas
+                        if not candidates:
+                            return pd.DataFrame(columns=["Mes", "Día del Mes", "Alias", "Vuelos disponibles"]).set_index(["Mes", "Día del Mes", "Alias"])
                         return pd.DataFrame(candidates).set_index(["Mes", "Día del Mes", "Alias"])
 
                     if not sa_swaps.empty:
