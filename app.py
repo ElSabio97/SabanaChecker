@@ -105,8 +105,10 @@ uploaded_files = st.file_uploader("Sube las sábanas en PDF (puedes subir varios
 if uploaded_files and st.session_state.df.empty:
     # Procesamiento de los PDFs subidos
     all_tables = []
+    st.write("### Depuración de PDFs subidos")
     try:
         for uploaded_file in uploaded_files:
+            st.write(f"**Procesando PDF: {uploaded_file.name}**")
             with pdfplumber.open(uploaded_file) as pdf:
                 date_range = None
                 for page in pdf.pages:
@@ -116,6 +118,7 @@ if uploaded_files and st.session_state.df.empty:
                         break
                 
                 if date_range:
+                    st.info(f"Rango de fechas encontrado en {uploaded_file.name}: {date_range[0].strftime('%Y-%m-%d')} a {date_range[-1].strftime('%Y-%m-%d')}")
                     tables = []
                     for i in range(0, len(pdf.pages), 2):
                         if i + 1 < len(pdf.pages):
@@ -133,6 +136,7 @@ if uploaded_files and st.session_state.df.empty:
                             
                             if table_even and table_odd and len(table_even) > 1 and len(table_odd) > 1:
                                 combined_df = combine_tables(table_even, table_odd, date_range)
+                                st.write(f"Tabla combinada para páginas {i+1}-{i+2}: {len(combined_df)} filas, columnas: {list(combined_df.columns)}")
                                 tables.append(combined_df)
                     
                     if tables:
@@ -140,19 +144,22 @@ if uploaded_files and st.session_state.df.empty:
                         df_month = pd.concat(tables, ignore_index=True)
                         df_month['Alias'] = df_month['Info'].apply(extract_alias)
                         df_month['Position'] = df_month['Info'].apply(extract_position)
+                        st.write(f"DataFrame del PDF {uploaded_file.name}: {len(df_month)} filas, columnas: {list(df_month.columns)}")
                         all_tables.append(df_month)
-                
+                    else:
+                        st.warning(f"No se encontraron tablas válidas en el PDF {uploaded_file.name}.")
                 else:
                     st.warning(f"No se encontró rango de fechas en el PDF {uploaded_file.name}.")
 
         if all_tables:
-            # Combinar todos los DataFrames de los PDFs, asegurando que las columnas de fechas no se dupliquen
+            st.write("### Combinando DataFrames de todos los PDFs")
+            # Combinar todos los DataFrames de los PDFs
             df_combined = all_tables[0]
-            for df in all_tables[1:]:
-                # Identificar columnas comunes no relacionadas con fechas
+            st.write(f"DataFrame inicial (PDF 1): {len(df_combined)} filas, columnas: {list(df_combined.columns)}")
+            for i, df in enumerate(all_tables[1:], 1):
                 common_cols = ['Info', 'Alias', 'Position']
-                # Añadir solo las columnas de fechas nuevas
                 new_date_cols = [col for col in df.columns if col not in common_cols and col not in df_combined.columns]
+                st.write(f"PDF {i+1}: Nuevas columnas de fechas: {new_date_cols}")
                 df_combined = df_combined.merge(
                     df[common_cols + new_date_cols],
                     on=common_cols,
@@ -160,14 +167,18 @@ if uploaded_files and st.session_state.df.empty:
                     suffixes=('', '_dup')
                 )
                 # Eliminar columnas duplicadas si existen
-                for col in df_combined.columns:
-                    if col.endswith('_dup'):
-                        df_combined.drop(columns=col, inplace=True)
+                dup_cols = [col for col in df_combined.columns if col.endswith('_dup')]
+                if dup_cols:
+                    st.warning(f"Columnas duplicadas eliminadas: {dup_cols}")
+                    df_combined.drop(columns=dup_cols, inplace=True)
+                st.write(f"DataFrame combinado tras PDF {i+1}: {len(df_combined)} filas, columnas: {list(df_combined.columns)}")
             
             if df_combined.empty:
                 st.warning("No hay datos en los PDFs procesados.")
             else:
                 st.session_state.df = df_combined
+                st.write(f"**DataFrame final combinado**: {len(df_combined)} filas, columnas: {list(df_combined.columns)}")
+                st.dataframe(df_combined.head())  # Mostrar las primeras filas del DataFrame combinado
                 df_combined.to_csv("output_with_alias_position.csv", index=False)
         else:
             st.warning("No se encontraron tablas válidas para combinar en los PDFs subidos.")
@@ -198,7 +209,12 @@ if not st.session_state.df.empty:
             user_in_training = "instruccion" in user_row['Info'].lower()
             
             st.write(f"Coincidencia encontrada: '{original_best_match}' (Similitud: {score}%)")
+            st.write("**Datos del usuario**:")
             st.dataframe(user_row.to_frame().T)
+            # Mostrar columnas con valores None para este usuario
+            none_columns = [col for col in user_row.index if user_row[col] is None and col.startswith('202')]
+            if none_columns:
+                st.warning(f"Columnas con valores None para el usuario: {none_columns}")
 
             # Filtrar fechas posteriores a la actual
             date_columns = [col for col in st.session_state.df.columns if col.startswith("202") and datetime.strptime(col, "%Y-%m-%d") > current_date]
