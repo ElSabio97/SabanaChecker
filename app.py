@@ -29,18 +29,21 @@ def combine_tables(table1, table2, date_list):
     return pd.DataFrame(combined_data, columns=headers[:len(table1[0]) + len(table2[0]) - 1])
 
 def normalize_text(text):
-    """Normaliza caracteres (Ñ → N, etc.) y convierte a mayúsculas."""
-    return ''.join(c for c in unicodedata.normalize('NFKD', text) if unicodedata.category(c) != 'Mn').upper()
+    """Normaliza caracteres (Ñ → N, etc.), elimina espacios extra y convierte a mayúsculas."""
+    if not isinstance(text, str):
+        return ""
+    text = ''.join(c for c in unicodedata.normalize('NFKD', text) if unicodedata.category(c) != 'Mn')
+    return ' '.join(text.split()).upper()
 
 def extract_alias(info):
     """Extrae el alias de la cadena completa."""
-    return info.split('\n')[0].strip()
+    return normalize_text(info.split('\n')[0].strip())
 
 def extract_position(info):
     """Extrae la posición (COMANDANTE o COPILOTO) de la cadena completa."""
     lines = info.split('\n')
     for line in lines:
-        line = line.strip().upper()
+        line = normalize_text(line.strip())
         if "COMANDANTE" in line:
             return "COMANDANTE"
         elif "COPILOTO" in line:
@@ -49,39 +52,29 @@ def extract_position(info):
 
 def format_flight_info(flight_str):
     """Procesa la cadena de vuelo para extraer el recorrido y las horas de salida/llegada."""
-    if not flight_str or flight_str.isspace():
+    if not flight_str or not isinstance(flight_str, str) or flight_str.isspace():
         return "Sin información"
     
-    # Reemplazar '#' por un espacio en blanco
     flight_str = flight_str.replace('#', ' ')
-    
-    # Dividir la cadena en partes
     parts = flight_str.split()
     if len(parts) < 2:
         return "Formato inválido"
     
-    # Extraer el código inicial (CO, SA, LI, etc.) y el resto
     code = parts[0]
     flight_data = parts[1:]
     
-    # Filtrar solo los códigos de aeropuerto (3 letras) y horas (4 dígitos)
     airports = []
     times = []
     for item in flight_data:
-        if re.match(r'^[A-Z]{3}$', item):  # Códigos de aeropuerto (3 letras)
+        if re.match(r'^[A-Z]{3}$', item):
             airports.append(item)
-        elif re.match(r'^\d{4}$', item):  # Horas (4 dígitos)
+        elif re.match(r'^\d{4}$', item):
             times.append(item)
     
-    # Ignorar códigos adicionales al final (como L00745 A00715)
-    # Asumimos que los aeropuertos están seguidos por sus horas de salida/llegada
     if not airports or not times:
         return "Sin datos válidos"
     
-    # Construir el recorrido (MAD - VCE - MAD)
     route = " - ".join(airports)
-    
-    # Formatear las horas: primera salida y última llegada
     if len(times) >= 2:
         start_time = f"{times[0][:2]}:{times[0][2:]}"
         end_time = f"{times[-1][:2]}:{times[-1][2:]}"
@@ -94,21 +87,16 @@ if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame()
 
 # Interfaz de Streamlit
-# Mostrar el logo antes del título usando la URL raw de GitHub
 st.image("https://raw.githubusercontent.com/ElSabio97/SabanaChecker/main/logo.png", use_column_width=True)
-
 st.title("Buscador de Intercambios de Vuelos")
 
 # Permitir al usuario subir múltiples archivos PDF
 uploaded_files = st.file_uploader("Sube las sábanas en PDF (puedes subir varios meses)", type="pdf", accept_multiple_files=True)
 
 if uploaded_files and st.session_state.df.empty:
-    # Procesamiento de los PDFs subidos
     all_tables = []
-    st.write("### Depuración de PDFs subidos")
     try:
         for uploaded_file in uploaded_files:
-            st.write(f"**Procesando PDF: {uploaded_file.name}**")
             with pdfplumber.open(uploaded_file) as pdf:
                 date_range = None
                 for page in pdf.pages:
@@ -118,7 +106,6 @@ if uploaded_files and st.session_state.df.empty:
                         break
                 
                 if date_range:
-                    st.info(f"Rango de fechas encontrado en {uploaded_file.name}: {date_range[0].strftime('%Y-%m-%d')} a {date_range[-1].strftime('%Y-%m-%d')}")
                     tables = []
                     for i in range(0, len(pdf.pages), 2):
                         if i + 1 < len(pdf.pages):
@@ -136,49 +123,47 @@ if uploaded_files and st.session_state.df.empty:
                             
                             if table_even and table_odd and len(table_even) > 1 and len(table_odd) > 1:
                                 combined_df = combine_tables(table_even, table_odd, date_range)
-                                st.write(f"Tabla combinada para páginas {i+1}-{i+2}: {len(combined_df)} filas, columnas: {list(combined_df.columns)}")
                                 tables.append(combined_df)
                     
                     if tables:
-                        # Combinar todas las tablas del PDF actual
                         df_month = pd.concat(tables, ignore_index=True)
                         df_month['Alias'] = df_month['Info'].apply(extract_alias)
                         df_month['Position'] = df_month['Info'].apply(extract_position)
-                        st.write(f"DataFrame del PDF {uploaded_file.name}: {len(df_month)} filas, columnas: {list(df_month.columns)}")
                         all_tables.append(df_month)
-                    else:
-                        st.warning(f"No se encontraron tablas válidas en el PDF {uploaded_file.name}.")
+                
                 else:
                     st.warning(f"No se encontró rango de fechas en el PDF {uploaded_file.name}.")
 
         if all_tables:
-            st.write("### Combinando DataFrames de todos los PDFs")
-            # Combinar todos los DataFrames de los PDFs
             df_combined = all_tables[0]
-            st.write(f"DataFrame inicial (PDF 1): {len(df_combined)} filas, columnas: {list(df_combined.columns)}")
-            for i, df in enumerate(all_tables[1:], 1):
-                common_cols = ['Info', 'Alias', 'Position']
+            common_cols = ['Info', 'Alias', 'Position']
+            for df in all_tables[1:]:
                 new_date_cols = [col for col in df.columns if col not in common_cols and col not in df_combined.columns]
-                st.write(f"PDF {i+1}: Nuevas columnas de fechas: {new_date_cols}")
                 df_combined = df_combined.merge(
                     df[common_cols + new_date_cols],
-                    on=common_cols,
+                    on=['Alias', 'Position'],
                     how='outer',
                     suffixes=('', '_dup')
                 )
-                # Eliminar columnas duplicadas si existen
-                dup_cols = [col for col in df_combined.columns if col.endswith('_dup')]
-                if dup_cols:
-                    st.warning(f"Columnas duplicadas eliminadas: {dup_cols}")
-                    df_combined.drop(columns=dup_cols, inplace=True)
-                st.write(f"DataFrame combinado tras PDF {i+1}: {len(df_combined)} filas, columnas: {list(df_combined.columns)}")
+                df_combined.drop(columns=[col for col in df_combined.columns if col.endswith('_dup')], inplace=True)
+            
+            # Consolidar filas por Alias, combinando valores no nulos
+            def combine_rows(group):
+                result = {}
+                for col in group.columns:
+                    non_null = group[col].dropna()
+                    if col in ['Info', 'Alias', 'Position']:
+                        result[col] = non_null.iloc[0] if not non_null.empty else None
+                    else:
+                        result[col] = non_null.iloc[0] if not non_null.empty else None
+                return pd.Series(result)
+            
+            df_combined = df_combined.groupby('Alias').apply(combine_rows).reset_index()
             
             if df_combined.empty:
                 st.warning("No hay datos en los PDFs procesados.")
             else:
                 st.session_state.df = df_combined
-                st.write(f"**DataFrame final combinado**: {len(df_combined)} filas, columnas: {list(df_combined.columns)}")
-                st.dataframe(df_combined.head())  # Mostrar las primeras filas del DataFrame combinado
                 df_combined.to_csv("output_with_alias_position.csv", index=False)
         else:
             st.warning("No se encontraron tablas válidas para combinar en los PDFs subidos.")
@@ -206,22 +191,14 @@ if not st.session_state.df.empty:
             original_best_match = st.session_state.df['Alias'].iloc[best_match_index]
             user_row = st.session_state.df[st.session_state.df['Alias'] == original_best_match].iloc[0]
             user_position = user_row['Position']
-            user_in_training = "instruccion" in user_row['Info'].lower()
+            user_in_training = "instruccion" in normalize_text(user_row['Info']).lower()
             
             st.write(f"Coincidencia encontrada: '{original_best_match}' (Similitud: {score}%)")
-            st.write("**Datos del usuario**:")
             st.dataframe(user_row.to_frame().T)
-            # Mostrar columnas con valores None para este usuario
-            none_columns = [col for col in user_row.index if user_row[col] is None and col.startswith('202')]
-            if none_columns:
-                st.warning(f"Columnas con valores None para el usuario: {none_columns}")
 
-            # Filtrar fechas posteriores a la actual
             date_columns = [col for col in st.session_state.df.columns if col.startswith("202") and datetime.strptime(col, "%Y-%m-%d") > current_date]
             
-            # Usar un formulario para evitar recargas
             with st.form(key="search_form"):
-                # Selector de fecha única (vuelo que el usuario quiere dar)
                 user_activity_dates = [col for col in date_columns if "CO" in str(user_row[col])]
                 if user_activity_dates:
                     selected_date = st.selectbox(
@@ -234,8 +211,6 @@ if not st.session_state.df.empty:
                     st.warning("No tienes vuelos con 'CO' en fechas futuras.")
                     selected_date = None
 
-                # Selector de fechas múltiples (vuelos que el usuario está dispuesto a tomar)
-                # Excluir la fecha seleccionada y filtrar solo fechas con "SA" o "LI" para el usuario
                 available_dates_options = [
                     date for date in date_columns
                     if date != selected_date and (
@@ -249,12 +224,9 @@ if not st.session_state.df.empty:
                     key="available_dates"
                 )
 
-                # Botón "Buscar" dentro del formulario
                 search_button = st.form_submit_button(label="Buscar")
 
-            # Procesar solo si se presiona "Buscar"
             if search_button and selected_date and available_dates:
-                # Filtrar compañeros según "instruccion" además de "SA"/"LI" y posición
                 potential_swaps = st.session_state.df[
                     (st.session_state.df[selected_date].str.contains("SA", na=False) | 
                      st.session_state.df[selected_date].str.contains("LI", na=False)) & 
@@ -264,11 +236,9 @@ if not st.session_state.df.empty:
                 ]
 
                 if not potential_swaps.empty:
-                    # Separar en SA y LI
                     sa_swaps = potential_swaps[potential_swaps[selected_date].str.contains("SA", na=False)]
                     li_swaps = potential_swaps[potential_swaps[selected_date].str.contains("LI", na=False)]
 
-                    # Preparar datos para tablas
                     def prepare_table_data(df_subset):
                         candidates = []
                         for index, row in df_subset.iterrows():
@@ -284,7 +254,6 @@ if not st.session_state.df.empty:
                                 })
                         return pd.DataFrame(candidates).set_index(["Mes", "Día del Mes", "Alias"])
 
-                    # Mostrar resultados agrupados
                     if not sa_swaps.empty:
                         sa_table = prepare_table_data(sa_swaps)
                         if not sa_table.empty:
