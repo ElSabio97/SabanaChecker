@@ -130,35 +130,44 @@ if uploaded_files and st.session_state.df.empty:
                         df_month['Alias'] = df_month['Info'].apply(extract_alias)
                         df_month['Position'] = df_month['Info'].apply(extract_position)
                         all_tables.append(df_month)
-                
+                    else:
+                        st.warning(f"No se encontraron tablas válidas en el PDF {uploaded_file.name}.")
                 else:
                     st.warning(f"No se encontró rango de fechas en el PDF {uploaded_file.name}.")
 
         if all_tables:
-            df_combined = all_tables[0]
-            common_cols = ['Info', 'Alias', 'Position']
-            for df in all_tables[1:]:
-                new_date_cols = [col for col in df.columns if col not in common_cols and col not in df_combined.columns]
-                df_combined = df_combined.merge(
-                    df[common_cols + new_date_cols],
-                    on=['Alias', 'Position'],
-                    how='outer',
-                    suffixes=('', '_dup')
-                )
-                df_combined.drop(columns=[col for col in df_combined.columns if col.endswith('_dup')], inplace=True)
+            # Normalizar Alias antes de combinar
+            for df in all_tables:
+                df['Alias'] = df['Alias'].apply(normalize_text)
             
-            # Consolidar filas por Alias, combinando valores no nulos
+            # Combinar DataFrames
+            df_combined = all_tables[0]
+            common_cols = ['Alias', 'Position', 'Info']
+            date_cols_all = set()
+            
+            # Recolectar todas las columnas de fechas
+            for df in all_tables:
+                date_cols_all.update([col for col in df.columns if col not in common_cols])
+            
+            # Inicializar DataFrame combinado con todas las columnas de fechas
+            df_combined = df_combined.reindex(columns=common_cols + list(date_cols_all))
+            
+            # Fusionar cada DataFrame adicional
+            for df in all_tables[1:]:
+                date_cols = [col for col in df.columns if col not in common_cols]
+                temp_df = df[common_cols + date_cols].copy()
+                temp_df = temp_df.reindex(columns=common_cols + list(date_cols_all))
+                df_combined = pd.concat([df_combined, temp_df], ignore_index=True)
+            
+            # Consolidar filas por Alias
             def combine_rows(group):
                 result = {}
                 for col in group.columns:
                     non_null = group[col].dropna()
-                    if col in ['Info', 'Alias', 'Position']:
-                        result[col] = non_null.iloc[0] if not non_null.empty else None
-                    else:
-                        result[col] = non_null.iloc[0] if not non_null.empty else None
+                    result[col] = non_null.iloc[0] if not non_null.empty else None
                 return pd.Series(result)
             
-            df_combined = df_combined.groupby('Alias').apply(combine_rows).reset_index()
+            df_combined = df_combined.groupby('Alias', as_index=False).apply(combine_rows)
             
             if df_combined.empty:
                 st.warning("No hay datos en los PDFs procesados.")
